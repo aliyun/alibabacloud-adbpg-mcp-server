@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "adbpg-mcp-server"
-version = "1.0.7"
-description = "MCP server for AnalyticDB PostgreSQL"
+version = "1.0.8"
+description = "MCP Server for AnalyticDB PostgreSQL"
 requires-python = ">=3.10"
 dependencies = [
     "mcp>=1.4.0",
