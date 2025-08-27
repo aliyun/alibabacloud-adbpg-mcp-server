@@ -43,7 +43,8 @@ Add the following configuration to the MCP client configuration file:
       "LLMEMORY_API_KEY": "llm memory api_key",
       "LLMEMORY_BASE_URL": "llm memory base_url",
       "LLMEMORY_LLM_MODEL": "llm memory model name",
-      "LLMEMORY_EMBEDDING_MODEL": "llm memory embedding model name"
+      "LLMEMORY_EMBEDDING_MODEL": "llm memory embedding model name",
+      "LLMEMORY_ENABLE_GRAPH": "enable graph engine for llm memory (Default: false)"
     }
   }
 }
@@ -78,6 +79,7 @@ pip install adbpg_mcp_server
       "LLMEMORY_BASE_URL": "llm memory base_url",
       "LLMEMORY_LLM_MODEL": "llm memory model name",
       "LLMEMORY_EMBEDDING_MODEL": "llm memory embedding model name"
+      "LLMEMORY_ENABLE_GRAPH": "enable graph engine for llm memory (Default: false)"
     }
   }
 }
@@ -206,6 +208,7 @@ MCP Server requires the following environment variables to initialize graphRAG a
 - `LLMEMORY_BASE_URL`: Base URL for LLM or embedding service endpoint
 - `LLMEMORY_LLM_MODEL`: LLM model name or identifier
 - `LLMEMORY_EMBEDDING_MODEL`: Embedding model name or identifier
+- `LLMEMORY_ENABLE_GRAPH`: (Optional) Enable graph engine for llm memory (Default: false)
 
 ## Dependencies
 

@@ -70,7 +70,7 @@ except Exception as e:
     logger.error(f"Error loading environment variables: {e}")
     sys.exit(1)
 
-SERVER_VERSION = "0.1.0"
+SERVER_VERSION = "0.2.0"
 
 
 # 获得 graphrag 初始化配置
@@ -91,6 +91,22 @@ def get_graphrag_config():
     
 # 获得llmemory 初始化配置
 def get_llmemory_config():
+    config = get_db_config()
+    port = 3000
+    sql = """
+        select port from gp_segment_configuration where content = -1 and role = 'p';
+    """
+    try:
+        with psycopg.connect(**config) as conn:
+            conn.autocommit = True
+            with conn.cursor() as cursor:
+                cursor.execute(sql)
+                port = cursor.fetchone()[0]
+    except Error as e:
+        raise RuntimeError(f"Database error: {str(e)}")
+    llmemory_enable_graph = os.getenv("LLMEMORY_ENABLE_GRAPH", "False") 
+    
+
     llm_memory_config = {
         "llm": {
             "provider": "openai",
@@ -116,10 +132,22 @@ def get_llmemory_config():
                 "password": os.getenv("ADBPG_PASSWORD"),
                 "dbname": os.getenv("ADBPG_DATABASE"),
                 "hnsw": "True",
-                "embedding_model_dims": os.getenv("LLMEMORY_EMBEDDING_DIMS", 1024)
+                "embedding_model_dims": os.getenv("LLMEMORY_EMBEDDING_DIMS", 1024),
+                "port": port
             }
         }
     }
+    if llmemory_enable_graph == "True" or llmemory_enable_graph == "true":
+        llm_memory_config["graph_store"] = {
+            "provider": "adbpg",
+            "config": {
+                "url": "http://localhost",
+                "username": os.getenv("ADBPG_USER"),
+                "password": os.getenv("ADBPG_PASSWORD"),
+                "database": os.getenv("ADBPG_DATABASE"),
+                "port": port
+            }
+        }
     return llm_memory_config
 
 def get_db_config():
@@ -870,14 +898,18 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         if not query_mode:
             # default mode
             query_mode = "mix"
-        if not start_search_node_id:
-            start_search_node_id = None
-
-        # 命令拼接
+            
         wrapped_sql = f"""
-                SELECT adbpg_graphrag.query(%s::text, %s::text, %s::text)
-            """
-        params = [query_str, query_mode, start_search_node_id]
+            SELECT adbpg_graphrag.query(%s::text, %s::text)
+        """
+        params = [query_str, query_mode]
+
+        if start_search_node_id:
+            wrapped_sql = f"""
+                    SELECT adbpg_graphrag.query(%s::text, %s::text, %s::text)
+                """
+            params = [query_str, query_mode, start_search_node_id]
+        
         return get_graphrag_tool_result(wrapped_sql, params)
     
     elif name == "adbpg_graphrag_reset_tree_query":
