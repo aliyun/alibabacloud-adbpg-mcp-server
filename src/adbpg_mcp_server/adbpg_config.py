@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-SERVER_VERSION = "0.2.0"
+SERVER_VERSION = "2.0.1"
 
 try:
     load_dotenv()

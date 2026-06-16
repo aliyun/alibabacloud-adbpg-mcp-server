@@ -1,5 +1,7 @@
 # mcp_server/basic_operation.py
+import re
 import psycopg
+from psycopg import sql
 import logging
 from pydantic import AnyUrl
 from mcp.types import Resource, ResourceTemplate, Tool
@@ -8,6 +10,18 @@ from typing import Tuple
 
 
 logger = logging.getLogger(__name__)
+
+_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+def _validate_identifier(name: str, label: str = "identifier") -> str:
+    if not name or not _IDENTIFIER_RE.match(name):
+        raise ValueError(f"Invalid {label}: {name!r}")
+    return name
+
+def _strip_sql_comments(text: str) -> str:
+    text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
+    text = re.sub(r'--[^\n]*', '', text)
+    return text.strip()
 
 async def list_resources() -> list[Resource]:
     """列出可用的基本资源"""
@@ -66,8 +80,10 @@ async def read_resource(uri: AnyUrl, db: DatabaseManager) -> str:
                 return "\n".join([f"{table[0]} ({table[1]})" for table in cursor.fetchall()])
                 
             elif len(path_parts) == 3 and path_parts[2] == "ddl":
-                schema, table = path_parts[0], path_parts[1]
-                query = f"SELECT pg_get_ddl('{schema}.{table}'::regclass);"
+                schema, table = _validate_identifier(path_parts[0], "schema"), _validate_identifier(path_parts[1], "table")
+                query = sql.SQL("SELECT pg_get_ddl({}.{}::regclass);").format(
+                    sql.Identifier(schema), sql.Identifier(table)
+                )
                 cursor.execute(query)
                 ddl = cursor.fetchone()
                 return ddl[0] if ddl else f"No DDL found for {schema}.{table}"
@@ -120,41 +136,62 @@ def get_basic_tools() -> list[Tool]:
         ),
     ]
 
-async def call_basic_tool(name: str, arguments: dict, db: DatabaseManager) -> Tuple[str, dict, bool]:
+async def call_basic_tool(name: str, arguments: dict, db: DatabaseManager) -> Tuple:
     """
     准备执行基础工具的SQL和参数。
-    返回 (query_string, params, needs_json_agg)
+    返回 (query, params, fetch_mode)
+    fetch_mode: "select" — fetch rows and build JSON from column names;
+                "json" — fetch single JSON value from first row;
+                None — no result to fetch (DML/DDL/ANALYZE).
     """
-    query, params, needs_json_agg = None, None, False
-    
+    query, params, fetch_mode = None, None, None
+
     if name == "execute_select_sql":
         query_text = arguments.get("query")
-        if not query_text or not query_text.strip().upper().startswith("SELECT"):
+        stripped = _strip_sql_comments(query_text) if query_text else ""
+        if not stripped or not stripped.upper().startswith("SELECT"):
             raise ValueError("Query must be a SELECT statement")
-        query = f"SELECT json_agg(row_to_json(t)) FROM ({query_text.rstrip(';')}) AS t"
-        needs_json_agg = True
+        if ";" in stripped.rstrip(";"):
+            raise ValueError("Query must not contain multiple statements")
+        query = stripped.rstrip(";")
+        fetch_mode = "select"
     elif name == "execute_dml_sql":
         query = arguments.get("query")
-        if not query or not any(query.strip().upper().startswith(k) for k in ["INSERT", "UPDATE", "DELETE"]):
+        stripped = _strip_sql_comments(query) if query else ""
+        if not stripped or not any(stripped.upper().startswith(k) for k in ["INSERT", "UPDATE", "DELETE"]):
             raise ValueError("Query must be a DML statement (INSERT, UPDATE, DELETE)")
+        if ";" in stripped.rstrip(";"):
+            raise ValueError("Query must not contain multiple statements")
+        query = stripped.rstrip(";")
     elif name == "execute_ddl_sql":
         query = arguments.get("query")
-        if not query or not any(query.strip().upper().startswith(k) for k in ["CREATE", "ALTER", "DROP", "TRUNCATE"]):
+        stripped = _strip_sql_comments(query) if query else ""
+        if not stripped or not any(stripped.upper().startswith(k) for k in ["CREATE", "ALTER", "DROP", "TRUNCATE"]):
             raise ValueError("Query must be a DDL statement (CREATE, ALTER, DROP)")
+        if ";" in stripped.rstrip(";"):
+            raise ValueError("Query must not contain multiple statements")
+        query = stripped.rstrip(";")
     elif name == "analyze_table":
         schema, table = arguments.get("schema"), arguments.get("table")
         if not all([schema, table]):
             raise ValueError("Schema and table are required")
-        query = f"ANALYZE {schema}.{table}"
+        _validate_identifier(schema, "schema")
+        _validate_identifier(table, "table")
+        query = sql.SQL("ANALYZE {}.{}").format(
+            sql.Identifier(schema), sql.Identifier(table)
+        )
     elif name == "explain_query":
         query_text = arguments.get("query")
-        if not query_text:
+        stripped = _strip_sql_comments(query_text) if query_text else ""
+        if not stripped:
             raise ValueError("Query is required")
-        query = f"EXPLAIN (FORMAT JSON) {query_text}"
-        needs_json_agg = True # The output is already a single JSON value in a single row
+        if ";" in stripped.rstrip(";"):
+            raise ValueError("Query must not contain multiple statements")
+        query = f"EXPLAIN (FORMAT JSON) {stripped.rstrip(';')}"
+        fetch_mode = "json"
 
     if query is None:
         raise ValueError(f"Unknown basic tool: {name}")
 
-    return (query, params, needs_json_agg)
+    return (query, params, fetch_mode)
 
