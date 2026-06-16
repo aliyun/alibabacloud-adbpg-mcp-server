@@ -29,12 +29,17 @@ def main():
         default = 3000,
         help = "Port to bind the HTTP server to (default: 3000)."
     )
-    
+    http_group.add_argument(
+        "--auth-token",
+        default = None,
+        help = "Bearer token for HTTP endpoint authentication. Can also be set via MCP_AUTH_TOKEN env var."
+    )
+
     args = parser.parse_args()
     print(f"Starting ADBPG MCP Server with transport {args.transport}")
 
     if args.transport == "http":
-        run_http_server(host=args.host, port=args.port)
+        run_http_server(host=args.host, port=args.port, auth_token=args.auth_token)
     elif args.transport == "stdio":
         run_stdio_server()
     else:

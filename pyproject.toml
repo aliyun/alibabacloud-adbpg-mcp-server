@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "adbpg-mcp-server"
-version = "2.0.0"
+version = "2.0.1"
 description = "AnalyticDB PostgreSQL MCP Server serves as a universal interface between AI Agents and AnalyticDB PostgreSQL databases. It enables seamless communication between AI Agents and AnalyticDB PostgreSQL, helping AI Agents retrieve database metadata and execute SQL operations."
 readme = "README.md"
 requires-python = ">=3.11"

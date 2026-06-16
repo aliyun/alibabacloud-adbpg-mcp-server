@@ -1,10 +1,12 @@
 import requests
 import logging
 import json
+import hmac
 import click
 import contextlib
 import uvicorn
 import sys
+import os
 import mcp.types as types
 from pydantic import AnyUrl
 from collections.abc import AsyncIterator
@@ -13,9 +15,26 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types import Resource, Tool, TextContent, ResourceTemplate
 from starlette.applications import Starlette
 from starlette.routing import Mount
+from starlette.responses import JSONResponse
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from .adbpg import DatabaseManager
 from . import adbpg_basic_operation, adbpg_graphrag, adbpg_memory
 from .adbpg_config import settings
+
+
+class BearerAuthMiddleware(BaseHTTPMiddleware):
+    """Validates Bearer token on all requests when MCP_AUTH_TOKEN is set."""
+
+    def __init__(self, app, token: str):
+        super().__init__(app)
+        self.token = token
+
+    async def dispatch(self, request, call_next):
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer ") or not hmac.compare_digest(auth_header[7:], self.token):
+            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+        return await call_next(request)
 
 
 db_manager: DatabaseManager | None = None
@@ -68,7 +87,14 @@ def initialize_services():
 
 
 
-def run_http_server(host, port):
+def run_http_server(host, port, auth_token=None):
+
+    auth_token = auth_token or os.getenv("MCP_AUTH_TOKEN")
+    if not auth_token:
+        logger.warning(
+            "No authentication token configured. Set MCP_AUTH_TOKEN or use --auth-token "
+            "to protect the HTTP endpoint."
+        )
 
     # 创建MCP服务端
     app = Server("adbpg-mcp-server")
@@ -132,13 +158,18 @@ def run_http_server(host, port):
         try:
             # 分发到 Basic Operation
             if name in [t.name for t in adbpg_basic_operation.get_basic_tools()]:
-                query, params, needs_json_agg = await adbpg_basic_operation.call_basic_tool(name, arguments, db_manager)
+                query, params, fetch_mode = await adbpg_basic_operation.call_basic_tool(name, arguments, db_manager)
                 conn = db_manager.get_basic_connection()
                 with conn.cursor() as cursor:
                     cursor.execute(query, params)
-                    if needs_json_agg:
+                    if fetch_mode == "select":
+                        columns = [desc[0] for desc in cursor.description]
+                        rows = cursor.fetchall()
+                        json_result = [dict(zip(columns, row)) for row in rows]
+                        return [TextContent(type="text", text=json.dumps(json_result, ensure_ascii=False, indent=2, default=str))]
+                    elif fetch_mode == "json":
                         json_result = cursor.fetchone()[0]
-                        return [TextContent(type="text", text=json.dumps(json_result, ensure_ascii=False, indent=2))]
+                        return [TextContent(type="text", text=json.dumps(json_result, ensure_ascii=False, indent=2, default=str))]
                     else:
                         return [TextContent(type="text", text="Tool executed successfully.")]
 
@@ -194,10 +225,15 @@ def run_http_server(host, port):
                 logger.info("ADBPG MCP Server shutting down…")
     
     # 将MCP服务挂载到/mcp路径上，用户访问整个路径时，就会进入刚才创建的MCP HTTP会话管理器
+    middleware = []
+    if auth_token:
+        middleware.append(Middleware(BearerAuthMiddleware, token=auth_token))
+
     starlette_app = Starlette(
         debug=False,
         routes=[Mount("/mcp", app=handle_streamable_http)],
         lifespan=lifespan,
+        middleware=middleware,
     )
 
     # 利用uvicorn启动ASGI服务器并监听指定端口

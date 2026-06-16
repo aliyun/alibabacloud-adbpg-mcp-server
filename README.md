@@ -58,9 +58,11 @@ This mode exposes an HTTP server, which is useful for testing, debugging, or dir
 # Run the server in HTTP mode on the default host and port (127.0.0.1:3000)
 uv run adbpg-mcp-server --transport http
 
-# Specify a custom host and port
-uv run adbpg-mcp-server --transport http --host 0.0.0.0 --port 3000
+# Specify a custom host and port with authentication
+uv run adbpg-mcp-server --transport http --host 0.0.0.0 --port 3000 --auth-token your-secret-token
 ```
+
+> **Security:** When binding to `0.0.0.0` or any network-accessible address, always set an authentication token via `--auth-token` or the `MCP_AUTH_TOKEN` environment variable. Without a token, the `/mcp` endpoint is open to unauthenticated access. Clients must include the `Authorization: Bearer <token>` header in all requests.
 
 ## MCP Integration
 
@@ -121,6 +123,7 @@ To integrate this server with a parent MCP client, add the following configurati
       "ADBPG_USER": "username",
       "ADBPG_PASSWORD": "password",
       "ADBPG_DATABASE": "database",
+      "MCP_AUTH_TOKEN": "your-secret-token",
       "GRAPHRAG_API_KEY": "graphrag llm api key",
       "GRAPHRAG_BASE_URL": "graphrag llm base url",
       "GRAPHRAG_LLM_MODEL": "graphrag llm model name",
@@ -241,6 +244,10 @@ MCP Server requires the following environment variables to connect to AnalyticDB
 - `ADBPG_USER`: Database username
 - `ADBPG_PASSWORD`: Database password
 - `ADBPG_DATABASE`: Database name
+
+For HTTP transport mode, the following optional variable enables endpoint authentication:
+
+- `MCP_AUTH_TOKEN`: Bearer token for HTTP endpoint authentication (can also be set via `--auth-token` CLI argument). **Strongly recommended** when binding to non-loopback addresses.
 
 MCP Server requires the following environment variables to initialize graphRAG and llm memory server：
 

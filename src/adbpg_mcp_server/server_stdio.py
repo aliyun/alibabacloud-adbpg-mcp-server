@@ -113,13 +113,18 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     try:
         # 分发到 Basic Operation
         if name in [t.name for t in adbpg_basic_operation.get_basic_tools()]:
-            query, params, needs_json_agg = await adbpg_basic_operation.call_basic_tool(name, arguments, db_manager)
+            query, params, fetch_mode = await adbpg_basic_operation.call_basic_tool(name, arguments, db_manager)
             conn = db_manager.get_basic_connection()
             with conn.cursor() as cursor:
                 cursor.execute(query, params)
-                if needs_json_agg:
+                if fetch_mode == "select":
+                    columns = [desc[0] for desc in cursor.description]
+                    rows = cursor.fetchall()
+                    json_result = [dict(zip(columns, row)) for row in rows]
+                    return [TextContent(type="text", text=json.dumps(json_result, ensure_ascii=False, indent=2, default=str))]
+                elif fetch_mode == "json":
                     json_result = cursor.fetchone()[0]
-                    return [TextContent(type="text", text=json.dumps(json_result, ensure_ascii=False, indent=2))]
+                    return [TextContent(type="text", text=json.dumps(json_result, ensure_ascii=False, indent=2, default=str))]
                 else:
                     return [TextContent(type="text", text="Tool executed successfully.")]
 
